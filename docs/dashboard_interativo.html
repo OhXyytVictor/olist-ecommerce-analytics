@@ -102,6 +102,12 @@
       color: var(--text-muted);
       font-size: 0.8rem;
     }
+    .filter-bar { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 14px 18px; margin-bottom: 20px; }
+    .filter-bar label { display: flex; flex-direction: column; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); gap: 4px; font-weight: 600; }
+    .filter-bar select { background: #0d131f; color: var(--text); border: 1px solid var(--card-border); border-radius: 5px; padding: 7px 10px; font-size: 0.85rem; }
+    .filter-bar input[type=range] { width: 180px; }
+    .filter-bar button { background: transparent; color: var(--text); border: 1px solid var(--card-border); border-radius: 5px; padding: 8px 14px; font-size: 0.8rem; cursor: pointer; }
+    .filter-bar button:hover { background: #1e293b; }
   </style>
 </head>
 <body>
@@ -118,6 +124,28 @@
       <button class="filter-btn" onclick="filterRegion('Nordeste')">Nordeste</button>
       <button class="filter-btn" onclick="filterRegion('Centro-Oeste')">Centro-Oeste</button>
       <button class="filter-btn" onclick="filterRegion('Norte')">Norte</button>
+    </div>
+
+    <div class="filter-bar">
+      <label>Categoria
+        <select id="f-cat" onchange="applyAll()">
+          <option value="todas">Todas as categorias</option>
+          <option value="0">Consoles e Jogos</option>
+          <option value="1">Periféricos e Hardware</option>
+        </select>
+      </label>
+      <label>Taxa de atraso mínima: <span id="v-atraso">0%</span>
+        <input type="range" id="f-atraso" min="0" max="12" step="0.5" value="0" oninput="applyAll()">
+      </label>
+      <label>Métrica do gráfico regional
+        <select id="f-metrica" onchange="applyAll()">
+          <option value="ambas">Prazo e frete</option>
+          <option value="prazo_medio">Somente prazo médio</option>
+          <option value="frete_medio">Somente frete médio</option>
+        </select>
+      </label>
+      <button type="button" onclick="resetAll()">Limpar filtros</button>
+      <button type="button" onclick="exportCSV()">Exportar CSV</button>
     </div>
 
     <div class="kpi-grid">
@@ -216,64 +244,90 @@
       });
     }
 
+    let regiaoAtual = 'TODAS';
+    let slaChart, categoryChart;
+
+    function visiveis() {
+      const min = parseFloat(document.getElementById('f-atraso').value);
+      return data.regioes.filter(r => (regiaoAtual === 'TODAS' || r.regiao === regiaoAtual) && r.pct_atraso >= min);
+    }
+
     function filterRegion(reg) {
+      regiaoAtual = reg;
       document.querySelectorAll('.filter-btn').forEach(btn => {
         btn.classList.toggle('active', btn.innerText.includes(reg) || (reg === 'TODAS' && btn.innerText.includes('Todas')));
       });
+      applyAll();
+    }
 
-      if (reg === 'TODAS') {
-        const totalFaturamento = data.regioes.reduce((acc, r) => acc + r.faturamento, 0);
-        const totalPedidos = data.regioes.reduce((acc, r) => acc + r.pedidos, 0);
-        const totalAtrasados = data.regioes.reduce((acc, r) => acc + r.atrasados, 0);
-        const totalProtegida = data.regioes.reduce((acc, r) => acc + r.receita_protegida, 0);
-        const mediaPrazo = data.regioes.reduce((acc, r) => acc + (r.prazo_medio * r.pedidos), 0) / totalPedidos;
+    function setKpis(list) {
+      const n = list.reduce((a, r) => a + r.pedidos, 0);
+      const fat = list.reduce((a, r) => a + r.faturamento, 0);
+      const atr = list.reduce((a, r) => a + r.atrasados, 0);
+      const prot = list.reduce((a, r) => a + r.receita_protegida, 0);
+      const prazo = n ? list.reduce((a, r) => a + r.prazo_medio * r.pedidos, 0) / n : 0;
+      document.getElementById('kpi-faturamento').innerText = formatBRL(fat);
+      document.getElementById('kpi-pedidos').innerText = `${n.toLocaleString('pt-BR')} pedidos entregues`;
+      document.getElementById('kpi-prazo').innerText = n ? `${prazo.toFixed(1)} Dias` : '-';
+      document.getElementById('kpi-prazo-sub').innerText = list.length === 1 ? 'Prazo médio na região' : 'Média ponderada pelos pedidos';
+      document.getElementById('kpi-atraso').innerText = n ? `${((atr / n) * 100).toFixed(1)}%` : '-';
+      document.getElementById('kpi-atraso-sub').innerText = `${atr.toLocaleString('pt-BR')} pedidos fora do prazo`;
+      document.getElementById('kpi-protegida').innerText = formatBRL(prot);
+    }
 
-        document.getElementById('kpi-faturamento').innerText = formatBRL(totalFaturamento);
-        document.getElementById('kpi-pedidos').innerText = `${totalPedidos.toLocaleString('pt-BR')} pedidos entregues`;
-        document.getElementById('kpi-prazo').innerText = `${mediaPrazo.toFixed(1)} Dias`;
-        document.getElementById('kpi-prazo-sub').innerText = `Média nacional ponderada`;
-        document.getElementById('kpi-atraso').innerText = `${((totalAtrasados / totalPedidos) * 100).toFixed(1)}%`;
-        document.getElementById('kpi-atraso-sub').innerText = `${totalAtrasados} pedidos fora do prazo`;
-        document.getElementById('kpi-protegida').innerText = formatBRL(totalProtegida);
-        renderTable(data.regioes);
-      } else {
-        const item = data.regioes.find(r => r.regiao === reg);
-        if (item) {
-          document.getElementById('kpi-faturamento').innerText = formatBRL(item.faturamento);
-          document.getElementById('kpi-pedidos').innerText = `${item.pedidos.toLocaleString('pt-BR')} pedidos entregues`;
-          document.getElementById('kpi-prazo').innerText = `${item.prazo_medio.toFixed(1)} Dias`;
-          document.getElementById('kpi-prazo-sub').innerText = `Prazo médio na região`;
-          document.getElementById('kpi-atraso').innerText = `${item.pct_atraso.toFixed(1)}%`;
-          document.getElementById('kpi-atraso-sub').innerText = `${item.atrasados} pedidos com atraso`;
-          document.getElementById('kpi-protegida').innerText = formatBRL(item.receita_protegida);
-          renderTable([item]);
-        }
+    function applyAll() {
+      const min = parseFloat(document.getElementById('f-atraso').value);
+      document.getElementById('v-atraso').innerText = `${min.toFixed(1)}%`;
+      const list = visiveis();
+      setKpis(list);
+      renderTable(list);
+
+      if (slaChart) {
+        const metrica = document.getElementById('f-metrica').value;
+        slaChart.data.labels = list.map(r => r.regiao);
+        slaChart.data.datasets[0].data = list.map(r => r.prazo_medio);
+        slaChart.data.datasets[1].data = list.map(r => r.frete_medio);
+        slaChart.data.datasets[0].hidden = metrica === 'frete_medio';
+        slaChart.data.datasets[1].hidden = metrica === 'prazo_medio';
+        slaChart.update();
       }
+
+      if (categoryChart) {
+        const c = document.getElementById('f-cat').value;
+        const cats = c === 'todas' ? data.categorias : [data.categorias[parseInt(c, 10)]];
+        categoryChart.data.labels = cats.map(x => x.categoria);
+        categoryChart.data.datasets[0].data = cats.map(x => x.faturamento);
+        categoryChart.data.datasets[0].backgroundColor = c === 'todas' ? ['#3b82f6', '#10b981'] : [parseInt(c, 10) === 0 ? '#3b82f6' : '#10b981'];
+        categoryChart.update();
+      }
+    }
+
+    function resetAll() {
+      document.getElementById('f-cat').value = 'todas';
+      document.getElementById('f-atraso').value = 0;
+      document.getElementById('f-metrica').value = 'ambas';
+      filterRegion('TODAS');
+    }
+
+    function exportCSV() {
+      const rows = [['regiao', 'pedidos', 'faturamento', 'prazo_medio', 'frete_medio', 'pct_atraso', 'receita_protegida']];
+      visiveis().forEach(r => rows.push([r.regiao, r.pedidos, r.faturamento, r.prazo_medio, r.frete_medio, r.pct_atraso, r.receita_protegida]));
+      const blob = new Blob([rows.map(r => r.join(';')).join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'logistica_regional.csv';
+      a.click();
     }
 
     // Inicializar Graficos Chart.js
     window.onload = function() {
-      renderTable(data.regioes);
-
-      // Grafico 1: SLA e Frete
-      const ctx1 = document.getElementById('slaChart').getContext('2d');
-      new Chart(ctx1, {
+      slaChart = new Chart(document.getElementById('slaChart').getContext('2d'), {
         type: 'bar',
         data: {
           labels: data.regioes.map(r => r.regiao),
           datasets: [
-            {
-              label: 'Prazo Médio (Dias)',
-              data: data.regioes.map(r => r.prazo_medio),
-              backgroundColor: '#2563eb',
-              borderRadius: 4
-            },
-            {
-              label: 'Frete Médio (R$)',
-              data: data.regioes.map(r => r.frete_medio),
-              backgroundColor: '#64748b',
-              borderRadius: 4
-            }
+            { label: 'Prazo Médio (Dias)', data: data.regioes.map(r => r.prazo_medio), backgroundColor: '#2563eb', borderRadius: 4 },
+            { label: 'Frete Médio (R$)', data: data.regioes.map(r => r.frete_medio), backgroundColor: '#64748b', borderRadius: 4 }
           ]
         },
         options: {
@@ -286,25 +340,19 @@
         }
       });
 
-      // Grafico 2: Categorias
-      const ctx2 = document.getElementById('categoryChart').getContext('2d');
-      new Chart(ctx2, {
+      categoryChart = new Chart(document.getElementById('categoryChart').getContext('2d'), {
         type: 'doughnut',
         data: {
           labels: data.categorias.map(c => c.categoria),
-          datasets: [{
-            data: data.categorias.map(c => c.faturamento),
-            backgroundColor: ['#3b82f6', '#10b981'],
-            borderWidth: 0
-          }]
+          datasets: [{ data: data.categorias.map(c => c.faturamento), backgroundColor: ['#3b82f6', '#10b981'], borderWidth: 0 }]
         },
         options: {
           responsive: true,
-          plugins: {
-            legend: { position: 'bottom', labels: { color: '#94a3b8' } }
-          }
+          plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8' } } }
         }
       });
+
+      applyAll();
     };
   </script>
 </body>
